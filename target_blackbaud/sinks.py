@@ -3,6 +3,7 @@
 from target_blackbaud.client import BlackbaudSink
 from hotglue_models_crm.crm import Contact
 import json
+from target_blackbaud.constants import countries
 
 class ContactsSink(BlackbaudSink):
     """Blackbaud target sink class."""
@@ -15,8 +16,6 @@ class ContactsSink(BlackbaudSink):
     def preprocess_record(self, record: dict, context: dict) -> dict:
         
         record = self.validate_input(record)
-        with open('/home/keyna/target-blackbaud/target_blackbaud/countries.json') as file:
-            data = json.load(file)
 
         mapping = {
             "email": {
@@ -51,12 +50,15 @@ class ContactsSink(BlackbaudSink):
                 "city": main_address["city"],
                 "postal_code": main_address["postal_code"],
             }
-            if main_address["country"] in data.keys():
-                country = data[main_address["country"]]
+            if main_address["country"] in countries.keys():
+                country = countries[main_address["country"]]
                 mapping["address"]["country"] = country.capitalize()
-            elif main_address["country"] in data.values():
+            elif main_address["country"].upper() in countries.values():
                 country = main_address["country"]
                 mapping["address"]["country"] = country.capitalize()
+            else:
+                country = main_address["country"]
+                mapping["address"]["country"] = country
 
         if record.get("created_at"):
             mapping["created_at"] = record.get("created_at"),
