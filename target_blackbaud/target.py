@@ -5,10 +5,11 @@ from singer_sdk.target_base import Target
 from singer_sdk import typing as th
 
 from target_blackbaud.sinks import (
-    ContactsSink
+    ContactsSink,
+    OpportunitiesSink
 )
 
-SINK_TYPES = [ContactsSink]
+SINK_TYPES = [ContactsSink, OpportunitiesSink]
 
 class TargetBlackbaud(Target):
     """Sample target for Blackbaud."""

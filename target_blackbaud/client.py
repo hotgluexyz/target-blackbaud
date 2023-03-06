@@ -42,7 +42,7 @@ class BlackbaudSink(RecordSink, Rest):
 
     @property
     def base_url(self):
-        site_url = "https://api.sky.blackbaud.com/constituent/v1"
+        site_url = "https://api.sky.blackbaud.com/"
         return site_url
 
     def url(self, endpoint=None):
