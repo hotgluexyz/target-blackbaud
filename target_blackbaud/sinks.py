@@ -37,6 +37,22 @@ class ContactsSink(BlackbaudSink):
             "num_employees": record.get("number_of_employees"),
         }
 
+        email = record.get("email")
+
+        id = None
+        if email:
+            endpoint = f"constituent/v1/constituents/search?search_text={email}"
+            response = self.request_api("GET", endpoint=endpoint)
+            resp_json = response.json()
+
+            if len(resp_json["value"]):
+                id = resp_json[0]["id"]
+        else:
+            id = record.get("contact_id")
+        
+        if id:
+            mapping["id"] = id
+
         if record.get("birthdate"):
             birthdate = str(record.get("birthdate")).split("-")
             mapping["birthdate"] = {"d": birthdate[2], "m": birthdate[1], "y": birthdate[0]}
