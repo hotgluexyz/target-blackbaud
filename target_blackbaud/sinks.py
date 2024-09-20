@@ -1,5 +1,5 @@
 """Blackbaud target sink class, which handles writing streams."""
-
+from collections.abc import Sequence
 from target_blackbaud.client import BlackbaudSink
 from hotglue_models_crm.crm import Contact, Deal
 from target_blackbaud.constants import countries
@@ -27,10 +27,6 @@ class ContactsSink(BlackbaudSink):
             "lookup_id": record.get("id"),
             "middle": record.get("middle_name"),
             "name": record.get("company_name"),
-            "online_presence": {
-                "address": record.get("website"),
-                "type": "Web address"
-            },
             "title": record.get("salutation"),
             "type": "Individual",
             "industry":record.get("industry"),
@@ -38,7 +34,6 @@ class ContactsSink(BlackbaudSink):
         }
 
         email = record.get("email")
-
         id = None
         if email:
             endpoint = f"constituent/v1/constituents/search?search_text={email}"
@@ -47,43 +42,57 @@ class ContactsSink(BlackbaudSink):
 
             if len(resp_json["value"]):
                 id = resp_json[0]["id"]
-        else:
+        if id is None:
             id = record.get("contact_id")
-        
         if id:
             mapping["id"] = id
-
+        
+        website = record.get("website")
+        if website:
+            mapping["online_presence"] = {
+                "address": website,
+                "type": "Web address"
+            }
+        
         if record.get("birthdate"):
             birthdate = str(record.get("birthdate")).split("-")
-            mapping["birthdate"] = {"d": birthdate[2], "m": birthdate[1], "y": birthdate[0]}
+            if len(birthdate) == 3:
+                mapping["birthdate"] = {"d": birthdate[2], "m": birthdate[1], "y": birthdate[0]}
 
-        if len(record.get("addresses")):
-            main_address = record.get("addresses")[0]
+        addresses = record.get("addresses")
+        if addresses and isinstance(addresses, Sequence):
+            main_address: dict = record.get("addresses")[0]
+            country = main_address.get("country")
+            line1 = main_address.get("line1")
+            line2 = main_address.get("line2")
+            line3 = main_address.get("line3")
+            address_lines = " ".join(l.strip() for l in [line1, line2, line3] if l and isinstance(l, str) and l.strip())
             mapping["address"] = {
                 "type": "Business",
-                "address_lines": main_address["line1"] + " " + main_address["line2"] + " " + main_address["line3"],
-                "city": main_address["city"],
-                "postal_code": main_address["postal_code"],
+                "address_lines": address_lines,
+                "city": main_address.get("city"),
+                "postal_code": main_address.get("postal_code"),
             }
-            if main_address["country"] in countries.keys():
-                country = countries[main_address["country"]]
-                mapping["address"]["country"] = country.capitalize()
-            elif main_address["country"].upper() in countries.values():
-                country = main_address["country"]
+            if country in countries.keys():
+                mapping["address"]["country"] = countries[country].capitalize()
+            elif country.upper() in countries.values():
                 mapping["address"]["country"] = country.capitalize()
             else:
-                country = main_address["country"]
                 mapping["address"]["country"] = country
 
-        if record.get("created_at"):
-            mapping["created_at"] = record.get("created_at"),
+        created_at = record.get("created_at")
+        if created_at:
+            if isinstance(created_at, str):
+                mapping["created_at"] = created_at
+            else:
+                mapping["created_at"] = created_at.isoformat()
         
-        if len(record.get("phone_numbers")):
-            main_phonenumber = record.get("phone_numbers")[0]
-            mapping["phone"] = main_phonenumber
+        phone_numbers = record.get("phone_numbers")
+        if phone_numbers and isinstance(phone_numbers, Sequence):
+            mapping["phone"] = phone_numbers[0]
 
-        if record.get("external_id") and len(record.get("external_id")):
-            external_ids = record.get("external_id")
+        external_ids = record.get("external_id")
+        if external_ids and isinstance(external_ids, Sequence):
             for id in external_ids:
                 if id["name"] == "blackbaud":
                     mapping["import_id"] = id["value"]
@@ -176,7 +185,8 @@ class OpportunitiesSink(BlackbaudSink):
 
         if record.get("deadline"):
             deadline = str(record.get("close_date")).split("-")
-            mapping["deadline"] = {"d": deadline[2], "m": deadline[1], "y": deadline[0]}
+            if len(deadline) == 3:
+                mapping["deadline"] = {"d": deadline[2], "m": deadline[1], "y": deadline[0]}
 
         mapping = self.validate_output(mapping)
         return mapping
