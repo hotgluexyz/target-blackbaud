@@ -48,7 +48,7 @@ class BlackbaudSink(RecordSink, Rest):
     def url(self, endpoint=None):
         if not endpoint:
             endpoint = self.endpoint
-        return f"{self.base_url}/{endpoint}"
+        return f"{self.base_url}{endpoint}"
 
     def validate_input(self, record: dict):
         return self.unified_schema(**record).dict()
