@@ -12,22 +12,6 @@ class ContactsSink(BlackbaudSink):
     campaigns = None
     contact_type = "Contact"
 
-
-    def search_constituent_by_email(self, email: str):
-        endpoint = f"constituent/v1/constituents/search?search_text={email}"
-        endpoint = f"constituent/v1/constituents/search?search_text={email}"
-        response = self.request_api("GET", endpoint=endpoint)
-        resp_json = response.json()
-        if len(resp_json["value"]):
-            return resp_json["value"][0]
-        return None
-    
-    def get_constituent_by_id(self, id: str):
-        endpoint = f"constituent/v1/constituents/{id}"
-        response = self.request_api("GET", endpoint=endpoint)
-        resp_json = response.json()
-        return resp_json
-
     def preprocess_record(self, record: dict, context: dict) -> dict:
         
         record = self.validate_input(record)
@@ -51,16 +35,15 @@ class ContactsSink(BlackbaudSink):
 
         email = record.get("email")
         id = None
-        existing_contact = None
         if email:
-            email_search_result = self.search_constituent_by_email(email)
-            if email_search_result:
-                id = email_search_result["id"]
-                existing_contact = self.get_constituent_by_id(id)
-        elif record.get("contact_id"):
-            id = record.get("contact_id")
-            existing_contact = self.get_constituent_by_id(id)
+            endpoint = f"constituent/v1/constituents/search?search_text={email}"
+            response = self.request_api("GET", endpoint=endpoint)
+            resp_json = response.json()
 
+            if len(resp_json["value"]):
+                id = resp_json[0]["id"]
+        if id is None:
+            id = record.get("contact_id")
         if id:
             mapping["id"] = id
         
@@ -114,12 +97,6 @@ class ContactsSink(BlackbaudSink):
                 if id["name"] == "blackbaud":
                     mapping["import_id"] = id["value"]
 
-        only_upsert_empty_fields = self.config.get("only_upsert_empty_fields", False)
-        if existing_contact and only_upsert_empty_fields:
-            for key, value in mapping.items():
-                if existing_contact.get(key) is not None:
-                    mapping[key] = existing_contact.get(key)
-
         mapping = self.validate_output(mapping)
         return mapping
 
@@ -134,10 +111,11 @@ class ContactsSink(BlackbaudSink):
                     response = self.request_api(
                         "PATCH", endpoint=url, request_data=update_record
                     )
+                    id = response.json().get("id")
                 self.logger.info(f"{self.name} updated with id: {id}")
-            except Exception as e:
-                self.logger.info(f"Error updating {self.name} with id {id}: {e}")
-                raise e
+            except:
+                self.logger.info(f"{self.name} with id {id} does not exist.")
+                raise "Invalid id"
         else:
             try:
                 url = self.endpoint
