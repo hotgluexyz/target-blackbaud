@@ -4,6 +4,7 @@ from target_blackbaud.client import BlackbaudSink
 from hotglue_models_crm.crm import Contact, Deal
 from target_blackbaud.constants import countries
 
+
 class ContactsSink(BlackbaudSink):
     """Blackbaud target sink class."""
     endpoint = "constituent/v1/constituents"
@@ -15,7 +16,7 @@ class ContactsSink(BlackbaudSink):
 
     def search_constituent_by_email(self, email: str):
         endpoint = f"constituent/v1/constituents/search?search_text={email}"
-        endpoint = f"constituent/v1/constituents/search?search_text={email}"
+
         response = self.request_api("GET", endpoint=endpoint)
         resp_json = response.json()
         if len(resp_json["value"]):
@@ -90,12 +91,13 @@ class ContactsSink(BlackbaudSink):
                 "city": main_address.get("city"),
                 "postal_code": main_address.get("postal_code"),
             }
-            if country in countries.keys():
-                mapping["address"]["country"] = countries[country].capitalize()
-            elif country.upper() in countries.values():
-                mapping["address"]["country"] = country.capitalize()
-            else:
-                mapping["address"]["country"] = country
+            if country:
+                if country in countries.keys():
+                    mapping["address"]["country"] = countries[country].capitalize()
+                elif country.upper() in countries.values():
+                    mapping["address"]["country"] = country.capitalize()
+                else:
+                    mapping["address"]["country"] = country
 
         created_at = record.get("created_at")
         if created_at:
@@ -118,7 +120,7 @@ class ContactsSink(BlackbaudSink):
         mapping = self.validate_output(mapping)
         return mapping
 
-    def process_record(self, record: dict, context: dict) -> None:
+    def upsert_record(self, record, context) -> None:
         """Process the record."""
         if record.get("id"):
             id = record.get("id")
@@ -130,17 +132,19 @@ class ContactsSink(BlackbaudSink):
                         "PATCH", endpoint=url, request_data=update_record
                     )
                 self.logger.info(f"{self.name} updated with id: {id}")
+                return id, True, {"is_updated": True}
             except Exception as e:
                 self.logger.info(f"Error updating {self.name} with id {id}: {e}")
-                raise e
+                return id, False, {"error": str(e)}
         else:
             try:
                 url = self.endpoint
                 response = self.request_api("POST", endpoint=url, request_data=record)
                 id = response.json().get("id")
                 self.logger.info(f"{self.contact_type} created with id: {id}")
-            except:
-                raise
+                return id, True, {}
+            except Exception as e:
+                return None, False, {"error": str(e)}
 
 class OpportunitiesSink(BlackbaudSink):
     """Blackbaud target sink class."""

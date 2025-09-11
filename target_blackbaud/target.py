@@ -1,7 +1,7 @@
 """Blackbaud target class."""
 from typing import Type
 from singer_sdk.sinks import Sink
-from singer_sdk.target_base import Target
+from target_hotglue.target import TargetHotglue
 from singer_sdk import typing as th
 
 from target_blackbaud.sinks import (
@@ -11,16 +11,18 @@ from target_blackbaud.sinks import (
 
 SINK_TYPES = [ContactsSink, OpportunitiesSink]
 
-class TargetBlackbaud(Target):
+class TargetBlackbaud(TargetHotglue):
     """Sample target for Blackbaud."""
 
     name = "target-blackbaud"
+    SINK_TYPES = [ContactsSink, OpportunitiesSink]
 
     def __init__(
         self,
         config=None,
         parse_env_config=False,
         validate_config=True,
+        state=None,
     ) -> None:
         self.config_file = config[0]
         super().__init__(config, parse_env_config, validate_config)

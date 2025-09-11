@@ -1,4 +1,4 @@
-from singer_sdk.sinks import RecordSink
+from target_hotglue.sinks import HotglueSink
 from typing import Any, Dict, List, Optional, Callable, cast
 
 from target_blackbaud.rest import Rest
@@ -6,7 +6,7 @@ from singer_sdk.plugin_base import PluginBase
 from target_blackbaud.auth import BlackbaudAuthenticator
 from target_blackbaud.utils import clean_null
 
-class BlackbaudSink(RecordSink, Rest):
+class BlackbaudSink(Rest, HotglueSink):
     """BlackbaudSink target sink class."""
 
     def __init__(
@@ -76,9 +76,3 @@ class BlackbaudSink(RecordSink, Rest):
             else:
                 break
         return data
-
-    def init_state(self):
-        self.latest_state = self.latest_state or {"bookmarks": {}}
-        if self.name not in self.latest_state["bookmarks"]:
-            if not self.latest_state["bookmarks"].get(self.name):
-                self.latest_state["bookmarks"][self.name] = []
