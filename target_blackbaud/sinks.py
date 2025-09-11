@@ -114,11 +114,6 @@ class ContactsSink(BlackbaudSink):
                 if id["name"] == "blackbaud":
                     mapping["import_id"] = id["value"]
 
-        only_upsert_empty_fields = self.config.get("only_upsert_empty_fields", False)
-        if existing_contact and only_upsert_empty_fields:
-            for key, value in mapping.items():
-                if existing_contact.get(key) is not None:
-                    mapping[key] = existing_contact.get(key)
 
         mapping = self.validate_output(mapping)
         return mapping
