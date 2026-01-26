@@ -4,6 +4,7 @@ from datetime import datetime
 import backoff
 import requests
 from singer_sdk.exceptions import FatalAPIError, RetriableAPIError
+from hotglue_etl_exceptions import InvalidPayloadError
 
 
 class Rest:
@@ -56,7 +57,7 @@ class Rest:
                 msg = response.text
             except:
                 msg = self.response_error_message(response)
-            raise FatalAPIError(msg)
+            raise InvalidPayloadError(msg)
 
     def response_error_message(self, response: requests.Response) -> str:
         """Build error message for invalid http statuses."""

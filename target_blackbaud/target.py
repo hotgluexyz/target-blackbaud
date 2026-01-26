@@ -1,7 +1,7 @@
 """Blackbaud target class."""
 from typing import Type
 from singer_sdk.sinks import Sink
-from target_hotglue.target import TargetHotglue
+from hotglue_singer_sdk.target_sdk.target import TargetHotglue
 from singer_sdk import typing as th
 
 from target_blackbaud.sinks import (
