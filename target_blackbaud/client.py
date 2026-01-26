@@ -1,4 +1,4 @@
-from target_hotglue.sinks import HotglueSink
+from hotglue_singer_sdk.target_sdk.sinks import HotglueSink
 from typing import Any, Dict, List, Optional, Callable, cast
 
 from target_blackbaud.rest import Rest

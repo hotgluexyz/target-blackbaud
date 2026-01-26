@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Optional
 from base64 import b64encode
 from typing import Any, Dict, Optional
-
+from hotglue_etl_exceptions import InvalidCredentialsError
 import logging
 import requests
 
@@ -30,7 +30,6 @@ class BlackbaudAuthenticator:
         self._auth_endpoint = auth_endpoint
         self._config_file = target.config_file
         self._target = target
-        self.update_access_token()
 
     @property
     def auth_endpoint(self) -> str:
@@ -125,7 +124,7 @@ class BlackbaudAuthenticator:
             token_response.raise_for_status()
             self.logger.info("OAuth authorization attempt was successful.")
         except Exception as ex:
-            raise RuntimeError(
+            raise InvalidCredentialsError(
                 f"Failed OAuth login, response was '{token_response.json()}'. {ex}"
             )
         token_json = token_response.json()

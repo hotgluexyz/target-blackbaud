@@ -124,27 +124,20 @@ class ContactsSink(BlackbaudSink):
         """Process the record."""
         if record.get("id"):
             id = record.get("id")
-            try:
-                update_record = record.copy()
-                if update_record:
-                    url = "/".join([self.endpoint, id])
-                    response = self.request_api(
-                        "PATCH", endpoint=url, request_data=update_record
-                    )
-                self.logger.info(f"{self.name} updated with id: {id}")
-                return id, True, {"is_updated": True}
-            except Exception as e:
-                self.logger.info(f"Error updating {self.name} with id {id}: {e}")
-                return id, False, {"error": str(e)}
+            update_record = record.copy()
+            if update_record:
+                url = "/".join([self.endpoint, id])
+                response = self.request_api(
+                    "PATCH", endpoint=url, request_data=update_record
+                )
+            self.logger.info(f"{self.name} updated with id: {id}")
+            return id, True, {"is_updated": True}
         else:
-            try:
-                url = self.endpoint
-                response = self.request_api("POST", endpoint=url, request_data=record)
-                id = response.json().get("id")
-                self.logger.info(f"{self.contact_type} created with id: {id}")
-                return id, True, {}
-            except Exception as e:
-                return None, False, {"error": str(e)}
+            url = self.endpoint
+            response = self.request_api("POST", endpoint=url, request_data=record)
+            id = response.json().get("id")
+            self.logger.info(f"{self.contact_type} created with id: {id}")
+            return id, True, {}
 
 class OpportunitiesSink(BlackbaudSink):
     """Blackbaud target sink class."""
@@ -212,27 +205,22 @@ class OpportunitiesSink(BlackbaudSink):
         mapping = self.validate_output(mapping)
         return mapping
 
-    def process_record(self, record: dict, context: dict) -> None:
+    def upsert_record(self, record: dict, context: dict) -> None:
         """Process the record."""
         if record.get("id"):
             id = record.get("id")
-            try:
-                update_record = record.copy()
-                if update_record:
-                    url = "/".join([self.endpoint, id])
-                    response = self.request_api(
-                        "PATCH", endpoint=url, request_data=update_record
-                    )
-                    id = response.json().get("id")
-                self.logger.info(f"{self.name} updated with id: {id}")
-            except:
-                self.logger.info(f"{self.name} with id {id} does not exist.")
-                raise "Invalid id"
-        else:
-            try:
-                url = self.endpoint
-                response = self.request_api("POST", endpoint=url, request_data=record)
+            update_record = record.copy()
+            if update_record:
+                url = "/".join([self.endpoint, id])
+                response = self.request_api(
+                    "PATCH", endpoint=url, request_data=update_record
+                )
                 id = response.json().get("id")
-                self.logger.info(f"{self.name} created with id: {id}")
-            except:
-                raise
+                self.logger.info(f"{self.name} updated with id: {id}")
+                return id, True, {"is_updated": True}
+        else:
+            url = self.endpoint
+            response = self.request_api("POST", endpoint=url, request_data=record)
+            id = response.json().get("id")
+            self.logger.info(f"{self.name} created with id: {id}")
+            return id, True, {}
