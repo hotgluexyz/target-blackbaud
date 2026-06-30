@@ -224,3 +224,48 @@ class OpportunitiesSink(BlackbaudSink):
             id = response.json().get("id")
             self.logger.info(f"{self.name} created with id: {id}")
             return id, True, {}
+
+
+class ActionsSink(BlackbaudSink):
+    """Blackbaud target sink class."""
+
+    name = "actions"
+    endpoint = "constituent/v1/actions"
+
+    def preprocess_record(self, record: dict, context: dict) -> dict:
+        return record
+    
+    def upsert_record(self, record: dict, context: dict) -> None:
+        state = {}
+        id = record.get("id")
+        action = "POST"
+        endpoint = self.endpoint
+        if id:
+            state["is_updated"] = True
+            action = "PATCH"
+            id = record.get("id")
+            endpoint = "/".join([self.endpoint, id])
+        # send data
+        response = self.request_api(action, endpoint=endpoint, request_data=record)
+        if action == "POST":
+            id = response.json().get("id")
+        return id, True, state
+
+
+class UnsubscribesSink(BlackbaudSink):
+    """Blackbaud target sink class."""
+
+    name = "unsubscribes"
+    endpoint = "constituent/v1/constituent"
+
+    def preprocess_record(self, record: dict, context: dict) -> dict:
+        return record
+    
+    def upsert_record(self, record: dict, context: dict) -> None:
+        state = {}
+        id = record.get("id")
+        if not id:
+            raise ValueError("ID is required")
+        endpoint = "/".join([self.endpoint, id])
+        response = self.request_api("PATCH", endpoint=endpoint, request_data=record)
+        return id, True, state
