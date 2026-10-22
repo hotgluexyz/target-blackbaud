@@ -259,10 +259,20 @@ class ConstituentsSink(BlackbaudSink):
             payload["email"] = {**email, "type": "Email"}
 
         address = payload.get("address")
-        if isinstance(address, dict) and any(
-            address.get(k) for k in ("address_lines", "city", "postal_code", "state", "country")
-        ) and not address.get("type"):
-            payload["address"] = {**address, "type": "Home"}
+        if isinstance(address, dict):
+            address = dict(address)
+            if any(
+                address.get(k)
+                for k in ("address_lines", "city", "postal_code", "state", "country")
+            ) and not address.get("type"):
+                address["type"] = "Home"
+            country = address.get("country")
+            if country:
+                if country in countries:
+                    address["country"] = countries[country].capitalize()
+                elif country.upper() in countries.values():
+                    address["country"] = country.capitalize()
+            payload["address"] = address
 
         # Prefer snapshot remote id; otherwise match existing by email
         if not payload.get("id"):
