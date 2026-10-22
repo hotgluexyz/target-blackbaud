@@ -226,6 +226,70 @@ class OpportunitiesSink(BlackbaudSink):
             return id, True, {}
 
 
+class ConstituentsSink(BlackbaudSink):
+    """Passthrough sink for Blackbaud-native constituent payloads (catalog mapping)."""
+
+    name = "constituents"
+    endpoint = "constituent/v1/constituents"
+
+    def search_constituent_by_email(self, email: str):
+        endpoint = f"constituent/v1/constituents/search?search_text={email}"
+        response = self.request_api("GET", endpoint=endpoint)
+        resp_json = response.json()
+        if len(resp_json["value"]):
+            return resp_json["value"][0]
+        return None
+
+    def preprocess_record(self, record: dict, context: dict) -> dict:
+        payload = dict(record)
+
+        # hotglue snapshot key — not a Blackbaud API field
+        external_id = payload.pop("externalId", None)
+        if external_id is None:
+            external_id = payload.pop("external_id", None)
+
+        if external_id and not payload.get("lookup_id"):
+            payload["lookup_id"] = str(external_id)
+
+        if not payload.get("type"):
+            payload["type"] = "Individual"
+
+        email = payload.get("email")
+        if isinstance(email, dict) and email.get("address") and not email.get("type"):
+            payload["email"] = {**email, "type": "Email"}
+
+        address = payload.get("address")
+        if isinstance(address, dict) and any(
+            address.get(k) for k in ("address_lines", "city", "postal_code", "state", "country")
+        ) and not address.get("type"):
+            payload["address"] = {**address, "type": "Home"}
+
+        # Prefer snapshot remote id; otherwise match existing by email
+        if not payload.get("id"):
+            email_obj = payload.get("email")
+            email_address = email_obj.get("address") if isinstance(email_obj, dict) else None
+            if email_address:
+                match = self.search_constituent_by_email(email_address)
+                if match:
+                    payload["id"] = match["id"]
+
+        return self.validate_output(payload)
+
+    def upsert_record(self, record, context) -> None:
+        if record.get("id"):
+            id = record.get("id")
+            update_record = {k: v for k, v in record.items() if k != "id"}
+            url = "/".join([self.endpoint, id])
+            self.request_api("PATCH", endpoint=url, request_data=update_record)
+            self.logger.info(f"{self.name} updated with id: {id}")
+            return id, True, {"is_updated": True}
+
+        response = self.request_api("POST", endpoint=self.endpoint, request_data=record)
+        id = response.json().get("id")
+        self.logger.info(f"{self.name} created with id: {id}")
+        return id, True, {}
+
+
 class ActionsSink(BlackbaudSink):
     """Blackbaud target sink class."""
 

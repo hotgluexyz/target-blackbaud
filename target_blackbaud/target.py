@@ -6,18 +6,25 @@ from singer_sdk import typing as th
 
 from target_blackbaud.sinks import (
     ContactsSink,
+    ConstituentsSink,
     OpportunitiesSink,
     ActionsSink,
     UnsubscribesSink
 )
 
-SINK_TYPES = [ContactsSink, OpportunitiesSink, ActionsSink, UnsubscribesSink]
+SINK_TYPES = [
+    ContactsSink,
+    ConstituentsSink,
+    OpportunitiesSink,
+    ActionsSink,
+    UnsubscribesSink,
+]
 
 class TargetBlackbaud(TargetHotglue):
     """Sample target for Blackbaud."""
 
     name = "target-blackbaud"
-    SINK_TYPES = [ContactsSink, OpportunitiesSink, ActionsSink, UnsubscribesSink]
+    SINK_TYPES = SINK_TYPES
 
     def __init__(
         self,
