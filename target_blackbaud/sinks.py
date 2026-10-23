@@ -1,6 +1,8 @@
 """Blackbaud target sink class, which handles writing streams."""
 from collections.abc import Sequence
-from target_blackbaud.client import BlackbaudSink
+from datetime import datetime, timezone
+
+from target_blackbaud.client import BlackbaudBatchSink, BlackbaudSink
 from hotglue_models_crm.crm import Contact, Deal
 from target_blackbaud.constants import countries
 
@@ -300,26 +302,62 @@ class ConstituentsSink(BlackbaudSink):
         return id, True, {}
 
 
-class GiftsSink(BlackbaudSink):
-    """Passthrough sink for Blackbaud-native gift payloads (catalog mapping)."""
+class GiftsSink(BlackbaudBatchSink):
+    """Write gifts via AddGiftsToBatch to reduce per-gift API calls.
+
+    Docs: https://developer.sky.blackbaud.com/api#api=58bdd5edd7dcde06046081d6&operation=AddGiftsToBatch
+    """
 
     name = "gifts"
-    endpoint = "gift/v1/gifts"
+    endpoint = "gift/v1/giftbatches"
+    max_size = 50
     relation_fields = [
         {"field": "constituent_id", "objectName": "constituents"},
     ]
 
-    def preprocess_record(self, record: dict, context: dict) -> dict:
-        payload = dict(record)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._gift_batch_id = None
 
-        # hotglue snapshot key — not a Blackbaud API field
+    def _ensure_gift_batch_id(self) -> str:
+        """Return configured batch id, or create one gift batch for this job."""
+        configured = self.config.get("gift_batch_id")
+        if configured:
+            return str(configured)
+        if self._gift_batch_id:
+            return self._gift_batch_id
+
+        batch_number = f"HG-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+        response = self.request_api(
+            "POST",
+            endpoint="gift/v1/giftbatches",
+            request_data={
+                "batch_description": "hotglue Springboard gifts import",
+                "batch_number": batch_number,
+            },
+        )
+        body = response.json()
+        batch_id = body.get("batch_id") or body.get("id")
+        if not batch_id:
+            raise ValueError(f"CreateGiftBatch did not return a batch id: {body}")
+        self._gift_batch_id = str(batch_id)
+        self.logger.info(
+            "Created gift batch id=%s batch_number=%s",
+            self._gift_batch_id,
+            batch_number,
+        )
+        return self._gift_batch_id
+
+    def _prepare_gift_payload(self, record: dict) -> dict:
+        payload = dict(record)
+        existing_id = payload.pop("id", None)
+
         external_id = payload.pop("externalId", None)
         if external_id is None:
             external_id = payload.pop("external_id", None)
         if external_id and not payload.get("lookup_id"):
             payload["lookup_id"] = str(external_id)
 
-        # ETL owns gift type / payments shape; sink only fills API-required defaults.
         if not payload.get("gift_splits"):
             fund_id = self.config.get("default_fund_id")
             if not fund_id:
@@ -337,21 +375,107 @@ class GiftsSink(BlackbaudSink):
             payload["post_status"] = "DoNotPost"
             payload["post_date"] = None
 
-        return self.validate_output(payload)
+        # AddGiftsToBatch commonly expects a receipt entry.
+        if not payload.get("receipts") and payload.get("amount"):
+            payload["receipts"] = [
+                {
+                    "status": "NeedsReceipt",
+                    "amount": payload.get("amount"),
+                }
+            ]
 
-    def upsert_record(self, record, context) -> None:
-        if record.get("id"):
-            id = record.get("id")
-            update_record = {k: v for k, v in record.items() if k != "id"}
-            url = "/".join([self.endpoint, id])
-            self.request_api("PATCH", endpoint=url, request_data=update_record)
-            self.logger.info(f"{self.name} updated with id: {id}")
-            return id, True, {"is_updated": True}
+        return {
+            "_externalId": str(external_id) if external_id is not None else None,
+            "_existing_id": str(existing_id) if existing_id is not None else None,
+            "_payload": self.validate_output(payload),
+        }
 
-        response = self.request_api("POST", endpoint=self.endpoint, request_data=record)
-        id = response.json().get("id")
-        self.logger.info(f"{self.name} created with id: {id}")
-        return id, True, {}
+    def process_batch_record(self, record: dict, _index: int) -> dict:
+        return self._prepare_gift_payload(record)
+
+    def make_batch_request(self, records: list[dict]):
+        existing = [r for r in records if r.get("_existing_id")]
+        to_create = [r for r in records if not r.get("_existing_id")]
+        response = None
+        batch_id = None
+
+        if to_create:
+            batch_id = self._ensure_gift_batch_id()
+            gifts = [r["_payload"] for r in to_create]
+            response = self.request_api(
+                "POST",
+                endpoint=f"gift/v1/giftbatches/{batch_id}/gifts",
+                request_data={"batchGifts": gifts},
+            )
+            self.logger.info(
+                "Added %s gifts to batch %s",
+                len(gifts),
+                batch_id,
+            )
+
+        return {
+            "existing": existing,
+            "created": to_create,
+            "response": response,
+            "batch_id": batch_id,
+        }
+
+    def handle_batch_response(self, result: dict) -> dict:
+        state_updates = []
+
+        for record in result.get("existing") or []:
+            state_updates.append(
+                {
+                    "externalId": record.get("_externalId"),
+                    "id": record.get("_existing_id"),
+                    "success": True,
+                    "existing": True,
+                }
+            )
+
+        response = result.get("response")
+        created = result.get("created") or []
+        if not response:
+            return {"state_updates": state_updates}
+
+        body = response.json() if response.content else {}
+        gifts_by_lookup = {
+            str(g.get("lookup_id")): g
+            for g in (body.get("gifts") or [])
+            if g.get("lookup_id") is not None
+        }
+        errors_by_lookup = {
+            str(e.get("lookup_id")): e
+            for e in (body.get("errors") or [])
+            if e.get("lookup_id") is not None
+        }
+
+        for index, record in enumerate(created):
+            lookup_id = record.get("_payload", {}).get("lookup_id")
+            lookup_key = str(lookup_id) if lookup_id is not None else None
+            state = {
+                "externalId": record.get("_externalId"),
+                "success": response.ok and lookup_key not in errors_by_lookup,
+            }
+
+            if lookup_key and lookup_key in errors_by_lookup:
+                err = errors_by_lookup[lookup_key]
+                state["error"] = (
+                    err.get("exception_error_message")
+                    or err.get("exception_error_name")
+                    or err
+                )
+            elif lookup_key and lookup_key in gifts_by_lookup:
+                state["id"] = gifts_by_lookup[lookup_key].get("id")
+            elif response.ok and index < len(body.get("gifts") or []):
+                # Fallback when lookup_id is missing from the response ordering.
+                state["id"] = body["gifts"][index].get("id")
+            elif not response.ok:
+                state["error"] = body or response.text
+
+            state_updates.append(state)
+
+        return {"state_updates": state_updates}
 
 
 class ActionsSink(BlackbaudSink):

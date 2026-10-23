@@ -52,6 +52,14 @@ class TargetBlackbaud(TargetHotglue):
                 "ETL payload does not include gift_splits"
             ),
         ),
+        th.Property(
+            "gift_batch_id",
+            th.StringType,
+            description=(
+                "Optional Blackbaud gift batch system record id for AddGiftsToBatch. "
+                "If omitted, the target creates a new unapproved gift batch per job."
+            ),
+        ),
     ).to_dict()
     
     def get_sink_class(self, stream_name: str) -> Type[Sink]:

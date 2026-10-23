@@ -1,13 +1,15 @@
+from hotglue_singer_sdk.target_sdk.client import HotglueBatchSink
 from hotglue_singer_sdk.target_sdk.sinks import HotglueSink
-from typing import Any, Dict, List, Optional, Callable, cast
+from typing import Dict, List, Optional
 
 from target_blackbaud.rest import Rest
 from singer_sdk.plugin_base import PluginBase
 from target_blackbaud.auth import BlackbaudAuthenticator
 from target_blackbaud.utils import clean_null
 
-class BlackbaudSink(Rest, HotglueSink):
-    """BlackbaudSink target sink class."""
+
+class _BlackbaudRestMixin(Rest):
+    """Shared REST/auth helpers for record and batch Blackbaud sinks."""
 
     def __init__(
         self,
@@ -16,17 +18,30 @@ class BlackbaudSink(Rest, HotglueSink):
         schema: Dict,
         key_properties: Optional[List[str]],
     ) -> None:
-        """Initialize target sink."""
         self._target = target
         super().__init__(target, stream_name, schema, key_properties)
 
-
     @property
     def authenticator(self) -> BlackbaudAuthenticator:
-        """Return a new authenticator object."""
         return BlackbaudAuthenticator(
             self._target, "https://oauth2.sky.blackbaud.com/token"
         )
+
+    @property
+    def base_url(self):
+        return "https://api.sky.blackbaud.com/"
+
+    def url(self, endpoint=None):
+        if not endpoint:
+            endpoint = self.endpoint
+        return f"{self.base_url}{endpoint}"
+
+    def validate_output(self, mapping):
+        return clean_null(mapping)
+
+
+class BlackbaudSink(_BlackbaudRestMixin, HotglueSink):
+    """Blackbaud record sink class."""
 
     @property
     def name(self):
@@ -40,22 +55,8 @@ class BlackbaudSink(Rest, HotglueSink):
     def unified_schema(self):
         raise NotImplementedError
 
-    @property
-    def base_url(self):
-        site_url = "https://api.sky.blackbaud.com/"
-        return site_url
-
-    def url(self, endpoint=None):
-        if not endpoint:
-            endpoint = self.endpoint
-        return f"{self.base_url}{endpoint}"
-
     def validate_input(self, record: dict):
         return self.unified_schema(**record).dict()
-
-    def validate_output(self, mapping):
-        payload = clean_null(mapping)
-        return payload
 
     def get_reference_data(self, stream, fields=None, filter={}):
         page = 1
@@ -76,3 +77,17 @@ class BlackbaudSink(Rest, HotglueSink):
             else:
                 break
         return data
+
+
+class BlackbaudBatchSink(_BlackbaudRestMixin, HotglueBatchSink):
+    """Blackbaud batch sink class."""
+
+    unified_schema = None
+
+    @property
+    def name(self):
+        raise NotImplementedError
+
+    @property
+    def endpoint(self):
+        raise NotImplementedError
