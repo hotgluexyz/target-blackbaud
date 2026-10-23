@@ -7,6 +7,7 @@ from singer_sdk import typing as th
 from target_blackbaud.sinks import (
     ContactsSink,
     ConstituentsSink,
+    GiftsSink,
     OpportunitiesSink,
     ActionsSink,
     UnsubscribesSink
@@ -15,6 +16,7 @@ from target_blackbaud.sinks import (
 SINK_TYPES = [
     ContactsSink,
     ConstituentsSink,
+    GiftsSink,
     OpportunitiesSink,
     ActionsSink,
     UnsubscribesSink,
@@ -41,7 +43,15 @@ class TargetBlackbaud(TargetHotglue):
             "filepath",
             th.StringType,
             description="The path to the target output file"
-        )
+        ),
+        th.Property(
+            "default_fund_id",
+            th.StringType,
+            description=(
+                "Blackbaud fund system record id used for gift_splits when the "
+                "ETL payload does not include gift_splits"
+            ),
+        ),
     ).to_dict()
     
     def get_sink_class(self, stream_name: str) -> Type[Sink]:
