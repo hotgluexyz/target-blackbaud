@@ -309,92 +309,26 @@ class GiftsSink(BlackbaudSink):
         {"field": "constituent_id", "objectName": "constituents"},
     ]
 
-    _PAYMENT_METHODS = {
-        "credit": "CreditCard",
-        "creditcard": "CreditCard",
-        "credit_card": "CreditCard",
-        "bank account": "DirectDebit",
-        "bank_account": "DirectDebit",
-        "ach": "DirectDebit",
-        "cash": "Cash",
-        "check": "PersonalCheck",
-        "personalcheck": "PersonalCheck",
-    }
-
-    _FREQUENCIES = {
-        "monthly": "MONTHLY",
-        "weekly": "WEEKLY",
-        "quarterly": "QUARTERLY",
-        "sb_fs_quarterly": "QUARTERLY",
-        "annually": "ANNUALLY",
-        "annual": "ANNUALLY",
-        "yearly": "ANNUALLY",
-        "sb_fs_semi": "ANNUALLY",
-        "semi": "ANNUALLY",
-        "semiannual": "ANNUALLY",
-        "semi-annual": "ANNUALLY",
-        "every_two_weeks": "EVERY_TWO_WEEKS",
-        "every_four_weeks": "EVERY_FOUR_WEEKS",
-    }
-
-    def _map_payment_method(self, method) -> str:
-        if method is None:
-            return "Other"
-        key = str(method).strip().lower()
-        return self._PAYMENT_METHODS.get(key, "Other")
-
-    def _map_frequency(self, frequency) -> str:
-        if frequency is None:
-            return "MONTHLY"
-        key = str(frequency).strip().lower()
-        return self._FREQUENCIES.get(key, "MONTHLY")
-
-    def _is_recurring(self, value) -> bool:
-        if isinstance(value, bool):
-            return value
-        if value is None:
-            return False
-        return str(value).strip().lower() in {"true", "1", "yes"}
-
     def preprocess_record(self, record: dict, context: dict) -> dict:
         payload = dict(record)
 
+        # hotglue snapshot key — not a Blackbaud API field
         external_id = payload.pop("externalId", None)
         if external_id is None:
             external_id = payload.pop("external_id", None)
         if external_id and not payload.get("lookup_id"):
             payload["lookup_id"] = str(external_id)
 
-        recurring = self._is_recurring(payload.pop("recurring", None))
-        recurring_frequency = payload.pop("recurring_frequency", None)
-        payment_method = payload.pop("payment_method", None)
-        payload.pop("email", None)
-
-        if recurring:
-            payload["type"] = "RecurringGift"
-            payload["gift_status"] = "Active"
-            payload["recurring_gift_schedule"] = {
-                "frequency": self._map_frequency(recurring_frequency),
-                "start_date": payload.get("date"),
-            }
-        elif not payload.get("type"):
-            payload["type"] = "Donation"
-
-        if not payload.get("payments"):
-            payload["payments"] = [
-                {"payment_method": self._map_payment_method(payment_method)}
-            ]
-
+        # ETL owns gift type / payments shape; sink only fills API-required defaults.
         if not payload.get("gift_splits"):
             fund_id = self.config.get("default_fund_id")
             if not fund_id:
                 raise ValueError(
                     "default_fund_id is required in target config to create gifts"
                 )
-            amount = payload.get("amount")
             payload["gift_splits"] = [
                 {
-                    "amount": amount,
+                    "amount": payload.get("amount"),
                     "fund_id": str(fund_id),
                 }
             ]
