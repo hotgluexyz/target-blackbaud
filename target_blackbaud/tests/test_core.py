@@ -3,6 +3,7 @@
 import io
 import json
 import time
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -721,22 +722,29 @@ def test_snapshot_only_parent_relationships(api, run_target, tmp_path, monkeypat
 
 
 def test_failed_parent_cannot_route_child_write(api, run_target):
-    with pytest.raises(ValueError, match="parent record failed"):
-        run_target(
-            [
-                ("gifts", gift("failed-parent", id="70001", amount={"value": 0})),
-                (
-                    "gift_custom_fields",
-                    {
-                        "externalId": "child",
-                        "parent_id": "failed-parent",
-                        "category": "Campaign",
-                        "value": "Fall",
-                    },
-                ),
-            ]
-        )
-    assert not api.calls
+    api.post(BASE + "gift/v1/gifts", json={"id": "later-gift"})
+    state = run_target(
+        [
+            ("gifts", gift("failed-parent", id="70001", amount={"value": 0})),
+            (
+                "gift_custom_fields",
+                {
+                    "externalId": "child",
+                    "parent_id": "failed-parent",
+                    "category": "Campaign",
+                    "value": "Fall",
+                },
+            ),
+            ("gifts", gift("later")),
+        ]
+    )
+    child = state["bookmarks"]["gift_custom_fields"][0]
+    assert child["externalId"] == "child" and child["success"] is False
+    assert "parent record failed" in child["error"]
+    assert state["summary"]["gift_custom_fields"]["fail"] == 1
+    assert state["bookmarks"]["gifts"][-1]["id"] == "later-gift"
+    assert state["bookmarks"]["gifts"][-1]["success"] is True
+    assert len(api.calls) == 1
 
 
 def test_failed_record_remains_retryable(api, run_target, tmp_path):
@@ -809,12 +817,38 @@ def test_batch_child_requires_approved_gift_id(api, run_target, approved_id):
             },
         ),
     ]
+    api.get(BASE + "gift/v1/gifts/70002/customfields", json={"value": []})
+    add_json(
+        api,
+        "POST",
+        "gift/v1/gifts/customfields",
+        {"parent_id": "70002", "category": "Campaign", "value": "Winter"},
+        {"id": "cf-later"},
+    )
+    rows.append(
+        (
+            "gift_custom_fields",
+            {
+                "externalId": "later",
+                "parent_id": "70002",
+                "category": "Campaign",
+                "value": "Winter",
+            },
+        )
+    )
+    state = run_target(rows, config={"gift_write_mode": "batch"})
+    children = {b["externalId"]: b for b in state["bookmarks"]["gift_custom_fields"]}
+    assert (
+        children["later"]["id"] == "cf-later" and children["later"]["success"] is True
+    )
+    parent = state["bookmarks"]["gifts"][0]
+    assert parent["id"] == "batch-gift-1" and parent["success"] is True
     if approved_id:
-        state = run_target(rows, config={"gift_write_mode": "batch"})
-        assert state["bookmarks"]["gift_custom_fields"][0]["id"] == "cf-1"
+        assert children["cf"]["id"] == "cf-1"
     else:
-        with pytest.raises(ValueError, match="Batch gift is not approved"):
-            run_target(rows, config={"gift_write_mode": "batch"})
+        assert children["cf"]["success"] is False
+        assert "Batch gift is not approved" in children["cf"]["error"]
+    assert sum(c.request.url.endswith("/batch-a/gifts") for c in api.calls) == 1
 
 
 @pytest.mark.parametrize("existing_parent", [False, True])
@@ -833,34 +867,50 @@ def test_batch_snapshot_cannot_route_direct_gift_write(
     rows = []
     if existing_parent:
         rows.append(("gifts", {"externalId": "subscription-old", "id": "70002"}))
-    with pytest.raises(ValueError, match="Batch gift"):
-        run_target(
-            rows
-            + [
-                (
-                    "recurring_gift_statuses",
-                    {
-                        "externalId": "status",
-                        "gift_id": "subscription-old",
-                        "gift_status": "Held",
-                    },
-                )
-            ],
-            config={"gift_write_mode": "batch"},
-        )
+    state = run_target(
+        rows
+        + [
+            (
+                "recurring_gift_statuses",
+                {
+                    "externalId": "status",
+                    "gift_id": "subscription-old",
+                    "gift_status": "Held",
+                },
+            )
+        ],
+        config={"gift_write_mode": "batch"},
+    )
+    assert state["bookmarks"]["recurring_gift_statuses"][0]["success"] is False
+    assert "Batch gift" in state["bookmarks"]["recurring_gift_statuses"][0]["error"]
     assert not api.calls
 
 
-def test_rate_limit_honors_retry_after(api, run_target, monkeypatch):
+@pytest.mark.parametrize(
+    "retry_after,expected_delay",
+    [
+        ("3", 3),
+        ("not-a-date", 1),
+        ("Thu, 01 Jan 2026 00:00:05 -0000", 5),
+        ("Thu, 01 Jan 2026 00:00:05 GMT", 5),
+    ],
+)
+def test_rate_limit_honors_retry_after(
+    api, run_target, monkeypatch, retry_after, expected_delay
+):
     waits = []
+    monkeypatch.setattr(
+        "target_blackbaud.rest.datetime",
+        SimpleNamespace(now=lambda _: datetime(2026, 1, 1, tzinfo=timezone.utc)),
+    )
     monkeypatch.setattr(
         "target_blackbaud.rest.time", SimpleNamespace(sleep=waits.append)
     )
-    api.post(BASE + "gift/v1/gifts", status=429, headers={"Retry-After": "3"})
+    api.post(BASE + "gift/v1/gifts", status=429, headers={"Retry-After": retry_after})
     api.post(BASE + "gift/v1/gifts", json={"id": "70001"})
     state = run_target([("gifts", gift())])
     assert state["summary"]["gifts"]["success"] == 1
-    assert waits == [3]
+    assert waits == [expected_delay]
 
 
 def test_managed_refresh_uses_hotglue_not_local_client_secrets(

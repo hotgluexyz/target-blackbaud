@@ -56,10 +56,14 @@ class Rest:
                     try:
                         delay = float(retry_after)
                     except ValueError:
-                        delay = (
-                            parsedate_to_datetime(retry_after)
-                            - datetime.now(timezone.utc)
-                        ).total_seconds()
+                        try:
+                            when = parsedate_to_datetime(retry_after)
+                            if when.tzinfo is None:
+                                when = when.replace(tzinfo=timezone.utc)
+                            delay = (when - datetime.now(timezone.utc)).total_seconds()
+                        except (TypeError, ValueError):
+                            # Retain exponential backoff for malformed dates.
+                            pass
                 # Do not retry before a long provider-requested cooldown.
                 if delay > 300:
                     self.validate_response(response)

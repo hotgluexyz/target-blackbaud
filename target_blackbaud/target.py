@@ -40,6 +40,15 @@ SINK_TYPES = [
 ]
 
 
+class RelationResolutionError(ValueError):
+    """A rejected child relationship, with its mapped record and sink."""
+
+    def __init__(self, message, sink_name, record):
+        super().__init__(message)
+        self.sink_name = sink_name
+        self.record = record
+
+
 class TargetBlackbaud(TargetHotglue):
     """Sample target for Blackbaud."""
 
@@ -109,6 +118,27 @@ class TargetBlackbaud(TargetHotglue):
             snapshot["InputId"] = snapshot["InputId"].astype(str)
         return snapshot
 
+    def _process_record_message(self, message_dict):
+        """Report rejected relationships per record without losing drained parents."""
+        try:
+            super()._process_record_message(message_dict)
+        except RelationResolutionError as error:
+            sink = self.get_sink(error.sink_name, record=error.record)
+            # SDK sink initialization may load previous-job state. Keep the
+            # current state, including any parents drained during resolution.
+            current_state = self._latest_state
+            if not sink.latest_state:
+                sink.init_state()
+            self._latest_state = current_state
+            sink.update_state(
+                sink._build_record_error_state(error, record=error.record),
+                record=error.record,
+            )
+            for key in ("bookmarks", "summary"):
+                self._latest_state.setdefault(key, {})[sink.name] = sink.latest_state[
+                    key
+                ][sink.name]
+
     def get_record_id(self, sink_name, record, relation_fields=None):
         external_id = record.get(self.EXTERNAL_ID_KEY)
         own_bookmarks = self._latest_state.get("bookmarks", {}).get(sink_name, [])
@@ -143,8 +173,10 @@ class TargetBlackbaud(TargetHotglue):
                 else []
             )
             if matching and not matching[-1].get("success"):
-                raise ValueError(
-                    f"Cannot resolve {relation['field']}: parent record failed"
+                raise RelationResolutionError(
+                    f"Cannot resolve {relation['field']}: parent record failed",
+                    sink_name,
+                    record,
                 )
             if matching and matching[-1].get("id"):
                 parent = matching[-1]
@@ -153,8 +185,10 @@ class TargetBlackbaud(TargetHotglue):
                     or self.config.get("gift_write_mode") != "direct"
                 ):
                     if not parent.get("approved_gift_id"):
-                        raise ValueError(
-                            "Batch gift is not approved; a direct gift ID is required"
+                        raise RelationResolutionError(
+                            "Batch gift is not approved; a direct gift ID is required",
+                            sink_name,
+                            record,
                         )
                     record[relation["field"]] = parent["approved_gift_id"]
                 else:
@@ -170,8 +204,10 @@ class TargetBlackbaud(TargetHotglue):
                         snapshot is not None
                         and (snapshot["InputId"] == str(value)).any()
                     ):
-                        raise ValueError(
-                            "Batch gift snapshot cannot establish an approved direct gift ID"
+                        raise RelationResolutionError(
+                            "Batch gift snapshot cannot establish an approved direct gift ID",
+                            sink_name,
+                            record,
                         )
                 if value is not None:
                     record[relation["field"]] = str(value)
