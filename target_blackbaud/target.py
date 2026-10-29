@@ -61,7 +61,7 @@ class TargetBlackbaud(TargetHotglue):
         th.Property(
             "gift_write_mode",
             th.CustomType({"type": "string", "enum": ["batch", "direct"]}),
-            default="batch",
+            default="direct",
         ),
         th.Property(
             "gift_batch_description", th.StringType, default="hotglue gifts import"

@@ -27,7 +27,7 @@ Keep credentials, input and state outside Git.
 | `expires_in` | Absolute Unix expiry timestamp, as stored by Hotglue (not a relative duration). |
 | `_refresh_token_via_hg_api` | Defaults to `true`; refresh through the linked Hotglue connection. |
 | `client_id`, `client_secret`, `refresh_token` | Standalone OAuth refresh credentials; set `_refresh_token_via_hg_api: false` for standalone use. |
-| `gift_write_mode` | `batch` (default, retaining the existing behavior) or `direct`. |
+| `gift_write_mode` | `direct` (default) or `batch`. |
 | `default_fund_id` | Fallback fund ID when a gift has no `gift_splits`. Explicit splits take precedence. |
 | `gift_batch_id` | Existing batch for batch-mode gifts without a per-record `batch_id`. |
 | `gift_batch_description` | Description for the automatically created batch; defaults to `hotglue gifts import`. |
