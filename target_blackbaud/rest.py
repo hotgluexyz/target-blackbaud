@@ -1,92 +1,83 @@
-from base64 import b64encode
-from datetime import datetime
+"""Blackbaud transport: bounded throttling and no ambiguous write retries."""
 
-import backoff
+import json
+import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+
 import requests
-from singer_sdk.exceptions import FatalAPIError, RetriableAPIError
-from hotglue_etl_exceptions import InvalidPayloadError
+from hotglue_etl_exceptions import InvalidCredentialsError, InvalidPayloadError
+from hotglue_singer_sdk.target_sdk.common import HGJSONEncoder
 
 
 class Rest:
-    timeout = 300
-    access_token = None
+    timeout = 60
 
     @property
-    def http_headers(self) -> dict:
-        """Return the http headers needed."""
-        headers = {}
-        headers["Content-Type"] = "application/json"
-        headers.update(self.authenticator.auth_headers or {})
-        return headers
+    def http_headers(self):
+        return {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            **self.authenticator.auth_headers,
+        }
 
-    @backoff.on_exception(
-        backoff.expo,
-        (RetriableAPIError, requests.exceptions.ReadTimeout),
-        max_tries=5,
-        factor=2,
-    )
-    def _request(
-        self, http_method, endpoint, params=None, request_data=None, headers=None
-    ) -> requests.PreparedRequest:
-        """Prepare a request object."""
-        url = self.url(endpoint)
-        headers = self.http_headers
-
-        response = requests.request(
-            method=http_method,
-            url=url,
-            params=params,
-            headers=headers,
-            json=request_data,
-        )
-        self.validate_response(response)
-        return response
-
-    def request_api(self, http_method, endpoint=None, params=None, request_data=None, headers=None):
-        """Request records from REST endpoint(s), returning response records."""
-        resp = self._request(http_method, endpoint, params, request_data, headers)
-        return resp
-
-    def validate_response(self, response: requests.Response) -> None:
-        """Validate HTTP response."""
-        if response.status_code in [429] or 500 <= response.status_code < 600:
-            msg = self.response_error_message(response)
-            raise RetriableAPIError(msg, response)
-        elif 400 <= response.status_code < 500 and response.status_code not in [404]:
+    def request_api(
+        self, http_method, endpoint=None, params=None, request_data=None, headers=None
+    ):
+        method = http_method.upper()
+        for attempt in range(5):
             try:
-                msg = response.text
-            except:
-                msg = self.response_error_message(response)
-            raise InvalidPayloadError(msg)
+                response = requests.request(
+                    method,
+                    self.url(endpoint),
+                    params=params,
+                    headers={**self.http_headers, **(headers or {})},
+                    data=(
+                        json.dumps(request_data, cls=HGJSONEncoder)
+                        if request_data is not None
+                        else None
+                    ),
+                    timeout=self.timeout,
+                )
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+                # A timed-out write may already have succeeded. Never replay it.
+                if method != "GET" or attempt == 4:
+                    raise
+                time.sleep(2**attempt)
+                continue
 
-    def response_error_message(self, response: requests.Response) -> str:
-        """Build error message for invalid http statuses."""
-        if 400 <= response.status_code < 500:
-            error_type = "Client"
-        else:
-            error_type = "Server"
+            retryable = response.status_code == 429 or (
+                method == "GET" and response.status_code >= 500
+            )
+            if retryable and attempt < 4:
+                delay = 2**attempt
+                retry_after = response.headers.get("Retry-After")
+                if retry_after:
+                    try:
+                        delay = float(retry_after)
+                    except ValueError:
+                        try:
+                            when = parsedate_to_datetime(retry_after)
+                            if when.tzinfo is None:
+                                when = when.replace(tzinfo=timezone.utc)
+                            delay = (when - datetime.now(timezone.utc)).total_seconds()
+                        except (TypeError, ValueError):
+                            # Retain exponential backoff for malformed dates.
+                            pass
+                # Do not retry before a long provider-requested cooldown.
+                if delay > 300:
+                    self.validate_response(response)
+                time.sleep(max(0, delay))
+                continue
+            self.validate_response(response)
+            return response
 
-        return (
-            f"{response.status_code} {error_type} Error: "
-            f"{response.reason} for path: {self.endpoint}"
-        )
-
-    @staticmethod
-    def clean_dict_items(dict):
-        return {k: v for k, v in dict.items() if v not in [None, ""]}
-
-    def clean_payload(self, item):
-        item = self.clean_dict_items(item)
-        output = {}
-        for k, v in item.items():
-            if isinstance(v, datetime):
-                dt_str = v.strftime("%Y-%m-%dT%H:%M:%S%z")
-                if len(dt_str) > 20:
-                    output[k] = f"{dt_str[:-2]}:{dt_str[-2:]}"
-                else:
-                    output[k] = dt_str
-            elif isinstance(v, dict):
-                output[k] = self.clean_payload(v)
-            else:
-                output[k] = v
-        return output
+    def validate_response(self, response):
+        if response.status_code in (401, 403):
+            raise InvalidCredentialsError(
+                f"Blackbaud authorization failed (HTTP {response.status_code})"
+            )
+        if not 200 <= response.status_code < 300:
+            raise InvalidPayloadError(
+                f"Blackbaud HTTP {response.status_code}: {response.text}"
+            )

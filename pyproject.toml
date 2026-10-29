@@ -10,15 +10,15 @@ keywords = [
 license = "Apache 2.0"
 
 [tool.poetry.dependencies]
-python = "<3.11,>=3.7.1"
+python = "<3.11,>=3.10"
 requests = "^2.25.1"
-singer-sdk = "^0.9.0"
-hotglue-singer-sdk = "1.0.4"
+hotglue-singer-sdk = "1.0.51"
 hotglue-etl-exceptions = "0.1.0"
 hotglue-models-crm = { git = "https://gitlab.com/hotglue/hotglue-models-crm.git", tag = "v0.1.0" }
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2.5"
+responses = "^0.26.0"
 tox = "^3.24.4"
 flake8 = "^3.9.2"
 black = "^21.9b0"
