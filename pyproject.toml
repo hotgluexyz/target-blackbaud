@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "target-blackbaud"
-version = "0.0.1"
+version = "1.0.1"
 description = "`target-blackbaud` is a Singer target for Blackbaud, built with the Meltano SDK for Singer Targets."
 authors = ["Hotglue"]
 keywords = [
