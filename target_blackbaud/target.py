@@ -94,6 +94,17 @@ class TargetBlackbaud(TargetHotglue):
                 "If omitted, the target creates a new unapproved gift batch per job."
             ),
         ),
+        th.Property(
+            "disambiguate_email_matches_by_last_name",
+            th.BooleanType,
+            default=False,
+            description=(
+                "When multiple constituents match an email, resolve by last name "
+                "(case-insensitive). If several share that last name, use the first "
+                "search result. If none match, create a new constituent. Default "
+                "false: fail on ambiguous email matches."
+            ),
+        ),
     ).to_dict()
 
     def get_sink_class(self, stream_name: str) -> Type[Sink]:

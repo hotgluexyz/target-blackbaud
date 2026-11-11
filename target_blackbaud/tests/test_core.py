@@ -27,7 +27,7 @@ def run_target(tmp_path, monkeypatch, capsys):
         settings = {
             "subscription_key": "test-subscription",
             "access_token": "test-access",
-            "expires_in": int(time.time()) + 3600,
+            "expires_in": round(datetime.utcnow().timestamp()) + 3600,
             "_refresh_token_via_hg_api": False,
             "gift_write_mode": "direct",
             **(config or {}),
@@ -180,6 +180,166 @@ def test_ambiguous_email_does_not_create_or_update(api, run_target):
     )
     assert state["summary"]["constituents"]["fail"] == 1
     assert "Multiple constituents" in state["bookmarks"]["constituents"][0]["error"]
+
+
+def test_ambiguous_email_resolves_by_last_name(api, run_target):
+    api.get(
+        BASE + "constituent/v1/constituents/search",
+        json={"value": [{"id": "1"}, {"id": "2"}]},
+    )
+    api.get(BASE + "constituent/v1/constituents/1", json={"id": "1", "last": "Other"})
+    api.get(BASE + "constituent/v1/constituents/2", json={"id": "2", "last": "Donor"})
+    add_json(
+        api, "PATCH", "constituent/v1/constituents/2", {"preferred_name": "JJ"}
+    )
+    state = run_target(
+        [
+            (
+                "constituents",
+                {
+                    "externalId": "donor-last",
+                    "last": "Donor",
+                    "email": {"address": "shared@example.com"},
+                    "preferred_name": "JJ",
+                },
+            )
+        ],
+        config={"disambiguate_email_matches_by_last_name": True},
+    )
+    assert state["summary"]["constituents"]["updated"] == 1
+    assert state["bookmarks"]["constituents"][0]["id"] == "2"
+
+
+def test_ambiguous_email_picks_first_matching_last_name(api, run_target):
+    api.get(
+        BASE + "constituent/v1/constituents/search",
+        json={"value": [{"id": "1"}, {"id": "2"}, {"id": "3"}]},
+    )
+    api.get(BASE + "constituent/v1/constituents/1", json={"id": "1", "last": "Donor"})
+    api.get(BASE + "constituent/v1/constituents/2", json={"id": "2", "last": "Donor"})
+    api.get(BASE + "constituent/v1/constituents/3", json={"id": "3", "last": "Other"})
+    add_json(
+        api, "PATCH", "constituent/v1/constituents/1", {"preferred_name": "JJ"}
+    )
+    state = run_target(
+        [
+            (
+                "constituents",
+                {
+                    "externalId": "donor-first",
+                    "last": "donor",
+                    "email": {"address": "shared@example.com"},
+                    "preferred_name": "JJ",
+                },
+            )
+        ],
+        config={"disambiguate_email_matches_by_last_name": True},
+    )
+    assert state["summary"]["constituents"]["updated"] == 1
+    assert state["bookmarks"]["constituents"][0]["id"] == "1"
+
+
+def test_ambiguous_email_without_last_still_fails_when_disambiguating(api, run_target):
+    api.get(
+        BASE + "constituent/v1/constituents/search",
+        json={"value": [{"id": "1"}, {"id": "2"}]},
+    )
+    state = run_target(
+        [
+            (
+                "constituents",
+                {
+                    "externalId": "ambiguous-no-last",
+                    "email": {"address": "shared@example.com"},
+                },
+            )
+        ],
+        config={"disambiguate_email_matches_by_last_name": True},
+    )
+    assert state["summary"]["constituents"]["fail"] == 1
+    assert "Multiple constituents" in state["bookmarks"]["constituents"][0]["error"]
+
+
+def test_ambiguous_email_no_last_overlap_creates(api, run_target):
+    api.get(
+        BASE + "constituent/v1/constituents/search",
+        json={"value": [{"id": "1"}, {"id": "2"}]},
+    )
+    api.get(BASE + "constituent/v1/constituents/1", json={"id": "1", "last": "Other"})
+    api.get(BASE + "constituent/v1/constituents/2", json={"id": "2", "last": "Also"})
+    record = {
+        "externalId": "new-donor",
+        "first": "Jane",
+        "last": "Donor",
+        "type": "Individual",
+        "email": {"address": "shared@example.com", "type": "Email"},
+    }
+    add_json(
+        api,
+        "POST",
+        "constituent/v1/constituents",
+        {k: v for k, v in record.items() if k != "externalId"},
+        {"id": "99"},
+    )
+    state = run_target(
+        [("constituents", record)],
+        config={"disambiguate_email_matches_by_last_name": True},
+    )
+    assert state["bookmarks"]["constituents"][0]["id"] == "99"
+    assert state["summary"]["constituents"]["success"] == 1
+
+
+def test_ambiguous_email_resolves_match_on_later_search_page(api, run_target):
+    search = "constituent/v1/constituents/search"
+    api.get(
+        BASE + search,
+        json={
+            "value": [{"id": str(i)} for i in range(1, 6)],
+            "next_link": BASE + search + "?offset=50",
+        },
+        match=[
+            matchers.query_param_matcher(
+                {
+                    "search_text": "shared@example.com",
+                    "strict_search": "true",
+                    "limit": "50",
+                }
+            )
+        ],
+    )
+    api.get(
+        BASE + search + "?offset=50",
+        json={"value": [{"id": "6"}]},
+        match=[matchers.query_param_matcher({"offset": "50"})],
+    )
+    for i in range(1, 6):
+        api.get(
+            BASE + f"constituent/v1/constituents/{i}",
+            json={"id": str(i), "last": "Other"},
+        )
+    api.get(
+        BASE + "constituent/v1/constituents/6",
+        json={"id": "6", "last": "Donor"},
+    )
+    add_json(
+        api, "PATCH", "constituent/v1/constituents/6", {"preferred_name": "JJ"}
+    )
+    state = run_target(
+        [
+            (
+                "constituents",
+                {
+                    "externalId": "donor-page-2",
+                    "last": "Donor",
+                    "email": {"address": "shared@example.com"},
+                    "preferred_name": "JJ",
+                },
+            )
+        ],
+        config={"disambiguate_email_matches_by_last_name": True},
+    )
+    assert state["summary"]["constituents"]["updated"] == 1
+    assert state["bookmarks"]["constituents"][0]["id"] == "6"
 
 
 def test_address_duplicate_on_later_page_and_preferred_rule(api, run_target):
