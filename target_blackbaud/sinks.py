@@ -233,18 +233,39 @@ class ConstituentsSink(BlackbaudNativeSink):
     name = "constituents"
     endpoint = "constituent/v1/constituents"
 
-    def search_constituent_by_email(self, email: str):
+    @staticmethod
+    def _normalized_last(value) -> str:
+        return " ".join(str(value or "").casefold().split())
+
+    def _disambiguate_by_last_name(self, matches: list, last: str | None):
+        last_key = self._normalized_last(last)
+        if not last_key:
+            raise ValueError(
+                "Multiple constituents match the email; supply an explicit Blackbaud id"
+            )
+        last_matches = []
+        for match in matches:
+            constituent = self.request_api(
+                "GET", f"{self.endpoint}/{match['id']}"
+            ).json()
+            if self._normalized_last(constituent.get("last")) == last_key:
+                last_matches.append(match)
+        return last_matches[0] if last_matches else None
+
+    def search_constituent_by_email(self, email: str, last: str | None = None):
         response = self.request_api(
             "GET",
             f"{self.endpoint}/search",
             params={"search_text": email, "strict_search": "true", "limit": 5},
         )
         matches = response.json().get("value", [])
-        if len(matches) > 1:
-            raise ValueError(
-                "Multiple constituents match the email; supply an explicit Blackbaud id"
-            )
-        return matches[0] if matches else None
+        if len(matches) <= 1:
+            return matches[0] if matches else None
+        if self.config.get("disambiguate_email_matches_by_last_name"):
+            return self._disambiguate_by_last_name(matches, last)
+        raise ValueError(
+            "Multiple constituents match the email; supply an explicit Blackbaud id"
+        )
 
     def preprocess_record(self, record: dict, context: dict) -> dict:
         payload = dict(record)
@@ -254,7 +275,9 @@ class ConstituentsSink(BlackbaudNativeSink):
                 email_obj.get("address") if isinstance(email_obj, dict) else None
             )
             if email_address:
-                match = self.search_constituent_by_email(email_address)
+                match = self.search_constituent_by_email(
+                    email_address, last=payload.get("last")
+                )
                 if match:
                     payload["id"] = match["id"]
         if not payload.get("id"):

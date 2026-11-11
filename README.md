@@ -31,6 +31,7 @@ Keep credentials, input and state outside Git.
 | `default_fund_id` | Fallback fund ID when a gift has no `gift_splits`. Explicit splits take precedence. |
 | `gift_batch_id` | Existing batch for batch-mode gifts without a per-record `batch_id`. |
 | `gift_batch_description` | Description for the automatically created batch; defaults to `hotglue gifts import`. |
+| `disambiguate_email_matches_by_last_name` | Defaults to `false`. When `true` and multiple constituents match an email, resolve by comparing last names (case-insensitive). If several share that last name, use the first search result. If none match, create a new constituent. Without a usable inbound `last`, ambiguous email matches still fail. |
 
 Hotglue-managed refresh requires the linked connection and runtime environment
 variables `ENV_ID`, `FLOW`, `TENANT`, `TARGET`, and `API_KEY`. OAuth authorization
@@ -45,7 +46,7 @@ Blackbaud IDs are sent as strings. Other native fields pass through unless noted
 
 | Stream | Behavior |
 | --- | --- |
-| `constituents` | Create; resolve by explicit/snapshot ID or strict email search. Multiple email matches fail rather than choosing a donor. Existing donors retain `first`, `middle`, `last`, `name`, `type`, `email`, `phone` and `address`; only other mapped fields are patched. Identity-only updates skip. New constituents default to type `Individual`. |
+| `constituents` | Create; resolve by explicit/snapshot ID or strict email search. Multiple email matches fail rather than choosing a donor unless `disambiguate_email_matches_by_last_name` is enabled (then filter by inbound `last`, pick the first last-name match, or create if none). Existing donors retain `first`, `middle`, `last`, `name`, `type`, `email`, `phone` and `address`; only other mapped fields are patched. Identity-only updates skip. New constituents default to type `Individual`. |
 | `addresses` | Requires `constituent_id`. List all existing addresses and add only if the normalized address differs. Existing addresses are never edited. The new address is preferred only if it is the first. |
 | `phones` | Requires `constituent_id`. Add only when the digits-normalized number is absent. Existing phone records are never edited. |
 | `constituent_custom_fields` | `parent_id`, `category`, `value` create or match a value on the constituent; an explicit `id` identifies the custom-field value to patch. Ambiguous categories fail. |
