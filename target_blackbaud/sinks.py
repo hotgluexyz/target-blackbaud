@@ -253,19 +253,21 @@ class ConstituentsSink(BlackbaudNativeSink):
         return last_matches[0] if last_matches else None
 
     def search_constituent_by_email(self, email: str, last: str | None = None):
-        response = self.request_api(
-            "GET",
-            f"{self.endpoint}/search",
-            params={"search_text": email, "strict_search": "true", "limit": 5},
-        )
-        matches = response.json().get("value", [])
-        if len(matches) <= 1:
-            return matches[0] if matches else None
+        params = {"search_text": email, "strict_search": "true", "limit": 5}
         if self.config.get("disambiguate_email_matches_by_last_name"):
+            params["limit"] = 50
+            matches = self.list_records(f"{self.endpoint}/search", params=params)
+            if len(matches) <= 1:
+                return matches[0] if matches else None
             return self._disambiguate_by_last_name(matches, last)
-        raise ValueError(
-            "Multiple constituents match the email; supply an explicit Blackbaud id"
-        )
+
+        response = self.request_api("GET", f"{self.endpoint}/search", params=params)
+        matches = response.json().get("value", [])
+        if len(matches) > 1:
+            raise ValueError(
+                "Multiple constituents match the email; supply an explicit Blackbaud id"
+            )
+        return matches[0] if matches else None
 
     def preprocess_record(self, record: dict, context: dict) -> dict:
         payload = dict(record)

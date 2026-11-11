@@ -31,7 +31,7 @@ Keep credentials, input and state outside Git.
 | `default_fund_id` | Fallback fund ID when a gift has no `gift_splits`. Explicit splits take precedence. |
 | `gift_batch_id` | Existing batch for batch-mode gifts without a per-record `batch_id`. |
 | `gift_batch_description` | Description for the automatically created batch; defaults to `hotglue gifts import`. |
-| `disambiguate_email_matches_by_last_name` | Defaults to `false`. When `true` and multiple constituents match an email, resolve by comparing last names (case-insensitive). If several share that last name, use the first search result. If none match, create a new constituent. Without a usable inbound `last`, ambiguous email matches still fail. |
+| `disambiguate_email_matches_by_last_name` | Defaults to `false`. When `true` and multiple constituents match an email, page through all search results and resolve by comparing last names (case-insensitive). If several share that last name, use the first search result. If none match, create a new constituent. Without a usable inbound `last`, ambiguous email matches still fail. |
 
 Hotglue-managed refresh requires the linked connection and runtime environment
 variables `ENV_ID`, `FLOW`, `TENANT`, `TARGET`, and `API_KEY`. OAuth authorization
