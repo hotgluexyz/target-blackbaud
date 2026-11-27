@@ -37,7 +37,6 @@ class ContactsSink(BlackbaudSink):
 
         mapping = {
             "first": record.get("first_name"),
-            "inactive": not record.get("active"),
             "last": record.get("last_name"),
             "lookup_id": record.get("id"),
             "middle": record.get("middle_name"),
@@ -47,6 +46,9 @@ class ContactsSink(BlackbaudSink):
             "industry":record.get("industry"),
             "num_employees": record.get("number_of_employees"),
         }
+
+        if "active" in record:
+            mapping["inactive"] = not record.get("active")
 
         email = record.get("email")
 
