@@ -36,10 +36,6 @@ class ContactsSink(BlackbaudSink):
         record = self.validate_input(record)
 
         mapping = {
-            "email": {
-                "address": record.get("email"),
-                "type": "Email"
-            },
             "first": record.get("first_name"),
             "inactive": not record.get("active"),
             "last": record.get("last_name"),
@@ -53,6 +49,13 @@ class ContactsSink(BlackbaudSink):
         }
 
         email = record.get("email")
+
+        if email:
+            mapping["email"] = {
+                "address": email,
+                "type": "Email"
+            }
+
         id = None
         existing_contact = None
         if email:
